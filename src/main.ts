@@ -1,3 +1,4 @@
+import { Block } from './modules/blockchain/Block'
 import { Blockchain } from './modules/blockchain/Blockchain'
 import { Network } from './modules/network/Network'
 import { RingMember } from './modules/privacy/RingSignature'
@@ -13,9 +14,7 @@ const abid = new RingMember('abids_private_key')
 const baboucarr = new RingMember('baboucarr_private_key')
 const clive = new RingMember('clive_private_key')
 
-const ring = [Tovia, Paul, abid]
-
-const transaction = new Transaction(Tovia, Paul, 10, ring, '')
+const ring = [Tovia, Paul, abid, christen, lesley, baboucarr, clive]
 
 const network = new Network('ws://localhost:8000')
 
@@ -25,8 +24,19 @@ network.attachBlockchain(blockchain)
 
 // network.handleNewBlock(newBlock)
 // network.handleNewTransaction(newTransaction)
-
-const isTransactionValid = blockchain.addTransaction(transaction)
-if (isTransactionValid) {
-  blockchain.mineBlock(abid)
+for (let i = 0; i < 100; i++) {
+  const isTransactionValid =
+    blockchain.addTransaction(new Transaction(Tovia, Paul, i + 10, ring, '')) &&
+    blockchain.addTransaction(new Transaction(Tovia, Paul, i + 10, ring, '')) &&
+    blockchain.addTransaction(new Transaction(Tovia, Paul, i + 10, ring, '')) &&
+    blockchain.addTransaction(new Transaction(Tovia, Paul, i + 10, ring, '')) &&
+    blockchain.addTransaction(new Transaction(Tovia, Paul, i + 10, ring, ''))
+  if (isTransactionValid) {
+    let mined: Block | undefined
+    while (!mined) {
+      mined = blockchain.mineBlock(abid)
+    }
+  }
 }
+
+console.log({ blockchain, isValid: blockchain.isValidChain(blockchain.chain) })
