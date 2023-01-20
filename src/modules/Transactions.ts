@@ -11,7 +11,7 @@ export class Transaction {
   public amount: number
   public ring: RingMember[]
   public mask: string
-  public signature: ec.Signature
+  public signature: ec.Signature | undefined
 
   constructor(sender: RingMember, receiver: RingMember, amount: number, ring: RingMember[], mask: string) {
     this.sender = sender
@@ -19,21 +19,26 @@ export class Transaction {
     this.amount = amount
     this.ring = ring
     this.mask = mask
-    this.signature = this.createSignature()
+    const signature = this.createSignature()
+    if (!signature) return
+
+    this.signature = signature
   }
 
-  public createSignature(): ec.Signature {
-    const hash = createHash('sha256')
-      .update(this.sender.publicKey + this.mask + this.ring.map(member => member.publicKey).join(','))
-      .digest(`hex`)
-
-    return elliptic.sign(hash, this.sender.keypair)
+  public createSignature(): ec.Signature | undefined {
+    if (this.sender.getPublicKey()) {
+      const hash = createHash('sha256')
+        .update(this.sender.getPublicKey() + this.mask + this.ring.map(member => member.getPublicKey()).join(','))
+        .digest(`hex`)
+      return this.sender.keypair.sign(hash, 'base64')
+    }
   }
 
-  public verifySignature(): boolean {
+  public verifySignature(): boolean | undefined {
+    if (!this.signature) return
     const hash = createHash('sha256')
-      .update(this.sender.publicKey + this.mask + this.ring.map(member => member.publicKey).join(','))
+      .update(this.sender.getPublicKey() + this.mask + this.ring.map(member => member.getPublicKey()).join(','))
       .digest('hex')
-    return elliptic.verify(hash, this.signature, this.sender.keypair)
+    return this.sender.keypair.verify(hash, this.signature)
   }
 }

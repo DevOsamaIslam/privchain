@@ -27,7 +27,12 @@ export class Block {
     let transactionData = ''
     for (const transaction of this.transactions) {
       transactionData +=
-        transaction.sender.publicKey + transaction.receiver.publicKey + transaction.amount + transaction.mask + transaction.signature
+        transaction.sender.getPublicKey() +
+        transaction.receiver.getPublicKey() +
+        transaction.amount +
+        transaction.mask +
+        transaction.signature +
+        this.nonce
     }
     return createHash('sha256')
       .update(this.index + this.previousHash + this.timestamp + transactionData + this.nonce)
