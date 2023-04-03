@@ -1,46 +1,99 @@
-import { createHash } from 'crypto'
-import { Network } from '../network/Network'
+import { INITIAL_SUPPLY, MINING_INTERVAL, MINING_REWARD } from '../../app/config'
+import { IBalances } from '../../lib/@types/blockchain'
+import { getTimestamp } from '../../lib/helpers/timestamp'
 import { RingMember } from '../privacy/RingSignature'
-import { Transaction } from '../Transactions'
 import { Block } from './Block'
-import { INITIAL_SUPPLY, MINING_REWARD, MINING_INTERVAL } from '../../app/config'
+import { Transaction } from './Transactions'
 
 export class Blockchain {
-  private network: Network
   public chain: Block[]
   public initialSupply: number
   public miningReward = MINING_REWARD
-  public miningDifficulty = 4
-  public balances: { [key: string]: number } = {}
-  public pendingTransactions: Transaction[]
-  genesisMember: RingMember
+  public miningDifficulty = 5
+  public balances: IBalances = {}
+  public mempool: Transaction[]
+  static genesisMember: RingMember = new RingMember("Tovia's private key")
+  private static instance: Blockchain
 
-  constructor(genesisMember: RingMember, network: Network) {
-    this.network = network
-    this.genesisMember = genesisMember
+  static getInstance() {
+    if (Blockchain.instance) {
+      return Blockchain.instance
+    }
+
+    return new Blockchain()
+  }
+  private constructor() {
     this.initialSupply = INITIAL_SUPPLY
-    this.pendingTransactions = []
+    this.mempool = []
     this.chain = [this.createGenesisBlock()]
   }
 
   // Method to create the Genesis block (initial block)
   public createGenesisBlock(): Block {
-    const genesisTransaction = new Transaction(this.genesisMember, this.genesisMember, 0, [], '')
-    const genesisBlock = new Block(0, Date.now(), [genesisTransaction], '0'.repeat(64), '', 0)
+    const genesisTransaction = new Transaction(Blockchain.genesisMember, Blockchain.genesisMember, 0, [], '')
+    const genesisBlock = new Block({
+      index: 0,
+      timestamp: getTimestamp(),
+      transactions: [genesisTransaction],
+      previousHash: '0'.repeat(64),
+      hash: '',
+      nonce: 0,
+    })
     genesisBlock.hash = genesisBlock.calculateHash()
+    genesisBlock.mine()
     this.balances = {
       [genesisTransaction.sender.getPublicKey()]: this.initialSupply,
     }
     return genesisBlock
   }
 
-  public createCoinbaseTransaction(miner: RingMember, reward: number): Transaction {
-    return new Transaction(this.genesisMember, miner, reward, [miner], '')
+  public createCoinbaseTransaction(miner: RingMember): Transaction {
+    return new Transaction(Blockchain.genesisMember, miner, this.miningReward, [miner], '')
   }
 
   // Method to get the latest block in the chain
   public getLatestBlock(): Block {
     return this.chain[this.chain.length - 1]
+  }
+
+  // Method to mine new blocks
+  public async mineBlock(miner: RingMember) {
+    const coinbaseTransaction = this.createCoinbaseTransaction(miner)
+    this.mempool.unshift(coinbaseTransaction)
+
+    // Proof of Work
+    let nonce = 0
+    let timesFound = 0
+    let proofFound = false
+    let newBlock: Block | undefined = undefined
+    const startTime = Date.now()
+    console.time('proof-of-work')
+    while (!proofFound || timesFound < this.miningDifficulty) {
+      nonce++
+      newBlock = new Block({
+        index: this.getLatestBlock().index + 1,
+        timestamp: getTimestamp(),
+        transactions: [...this.mempool],
+        previousHash: this.getLatestBlock().hash,
+        hash: '',
+        nonce,
+      })
+      newBlock.hash = newBlock.calculateHash()
+      proofFound = this.isValidProof(newBlock.hash)
+      if (proofFound) {
+        timesFound++
+      }
+    }
+
+    if (!newBlock) return
+
+    console.timeEnd('proof-of-work')
+    console.log(`Block mined: ${newBlock.hash} x${timesFound}`)
+    if (Date.now() - startTime < MINING_INTERVAL) this.miningDifficulty++
+    newBlock.transactions = [...this.mempool]
+    this.addBlock(newBlock)
+    this.mempool = []
+    return newBlock
   }
 
   // Method to add a new block to the chain
@@ -59,27 +112,6 @@ export class Blockchain {
 
     // Add new block to the list of blocks
     this.chain.push(newBlock)
-    this.network.broadcastLatest()
-  }
-
-  /**
-   * This method iterates over the transactions in the block and concatenates the transaction
-   * data into a string. It then calculates the hash of the block by hashing the block's
-   * index, previous hash, timestamp, transaction data, and nonce using the createHash function.
-   */
-  public calculateHashForBlock(block: Block): string {
-    let transactionData = ''
-    for (const transaction of block.transactions) {
-      transactionData +=
-        transaction.sender.getPublicKey() +
-        transaction.receiver.getPublicKey() +
-        transaction.amount +
-        transaction.mask +
-        transaction.signature
-    }
-    return createHash('sha256')
-      .update(block.index + block.previousHash + block.timestamp + transactionData + block.nonce)
-      .digest('hex')
   }
 
   // Method to check if the chain is valid
@@ -113,36 +145,6 @@ export class Blockchain {
     return true
   }
 
-  // Method to mine new blocks
-  public mineBlock(miner: RingMember) {
-    const coinbaseTransaction = this.createCoinbaseTransaction(miner, this.miningReward)
-    this.pendingTransactions.unshift(coinbaseTransaction)
-    const newBlock = new Block(this.getLatestBlock().index + 1, Date.now(), [], this.getLatestBlock().hash, '', 0)
-
-    // Proof of Work
-    let nonce = 0
-    let timesFound = 0
-    let proofFound = false
-    const startTime = Date.now()
-    console.time('proof-of-work')
-    while (!proofFound || timesFound < this.miningDifficulty) {
-      nonce++
-      newBlock.nonce = nonce
-      newBlock.hash = newBlock.calculateHash()
-      proofFound = this.isValidProof(newBlock.hash)
-      if (proofFound) {
-        timesFound++
-      }
-    }
-    console.timeEnd('proof-of-work')
-    console.log(`Block mined: ${newBlock.hash} x${timesFound}`)
-    if (Date.now() - startTime < MINING_INTERVAL) this.miningDifficulty++
-    newBlock.transactions = [...this.pendingTransactions]
-    this.addBlock(newBlock)
-    this.pendingTransactions = []
-    return newBlock
-  }
-
   // Method to check if a block is valid
   public isValidBlock(block: Block): boolean {
     const previousBlock = this.getLatestBlock()
@@ -152,8 +154,8 @@ export class Blockchain {
     } else if (previousBlock.hash !== block.previousHash) {
       console.log('Invalid previous hash')
       return false
-    } else if (this.calculateHashForBlock(block) !== block.hash) {
-      console.log(`${block.hash} ${this.calculateHashForBlock(block)} Invalid hash:`)
+    } else if (block.calculateHash() !== block.hash) {
+      console.log(`Invalid hash`)
       return false
     } else if (!this.isValidProof(block.hash)) {
       console.log('Invalid proof')
@@ -164,7 +166,7 @@ export class Blockchain {
 
   // Method to check if a block hash satisfies the difficulty requirement
   public isValidProof(hash: string): boolean {
-    return hash.startsWith('00000')
+    return hash.startsWith('000')
   }
 
   public isValidTransaction(transaction: Transaction): boolean {
@@ -205,7 +207,7 @@ export class Blockchain {
 
     // Other validation checks here
 
-    this.pendingTransactions.push(transaction)
+    this.mempool.push(transaction)
     return true
   }
 }

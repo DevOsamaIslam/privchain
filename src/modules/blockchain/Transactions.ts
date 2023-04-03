@@ -1,6 +1,6 @@
 import { createHash } from 'crypto'
 import { ec } from 'elliptic'
-import { RingMember } from './privacy/RingSignature'
+import { RingMember } from '../privacy/RingSignature'
 
 const elliptic = new ec('secp256k1')
 
